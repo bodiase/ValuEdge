@@ -455,7 +455,7 @@ class_summary_display["Precision"] = class_summary_display["Precision"].map(lamb
 class_summary_display["Recall"] = class_summary_display["Recall"].map(lambda x: format_percent(x, 1))
 st.dataframe(class_summary_display, use_container_width=True, hide_index=True)
 
-# OPTIONAL: Confusion matrix
+# Confusion matrix
 with st.expander("Optional: Confusion matrix"):
     st.write(
         "The confusion matrix below is computed directly from `valuation_test_predictions.csv`. "
