@@ -366,3 +366,4 @@ st.markdown(
 - **Methodology:** See the full model logic, coefficient breakdown, and feature design.
 - **Risk (CAPM):** Review the company’s market-risk profile and CAPM metrics.
 """
+)
