@@ -366,10 +366,3 @@ st.markdown(
 - **Methodology:** See the full model logic, coefficient breakdown, and feature design.
 - **Risk (CAPM):** Review the company’s market-risk profile and CAPM metrics.
 """
-)
-
-st.divider()
-st.caption(
-    "Note: If your class label encoding differs from the assumption in this file "
-    "(0=Overvalued, 1=Fairly Valued, 2=Undervalued), update the CLASS_LABELS mapping at the top."
-)
