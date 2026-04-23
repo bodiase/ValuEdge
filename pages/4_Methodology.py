@@ -1,517 +1,469 @@
-# Generated from: 4_Methodology.ipynb
-# Converted at: 2026-04-21T19:46:05.807Z
-# Next step (optional): refactor into modules & generate tests with RunCell
-# Quick start: pip install runcell
-
+import streamlit as st
+import pandas as pd
+import altair as alt
 from pathlib import Path
 
-import pandas as pd
-import streamlit as st
-from sklearn.metrics import confusion_matrix
+st.set_page_config(page_title="About / Methodology", layout="wide")
 
+st.title("About / Methodology")
+st.caption(
+    "This page explains the project objective, data sources, modeling approach, evaluation results, and workflow behind ValueLens."
+)
 
-# PAGE CONFIG
-st.set_page_config(page_title="Methodology", page_icon="🧠", layout="wide")
-
-
-# FILE PATHS
-BASE_DIR = Path(__file__).resolve().parents[1]
-
-CANDIDATE_PATHS = {
-    "model_comparison": [
-        BASE_DIR / "data" / "valuation_model_comparison_results.csv",
-        BASE_DIR / "valuation_model_comparison_results.csv",
-    ],
-    "test_predictions": [
-        BASE_DIR / "data" / "valuation_test_predictions.csv",
-        BASE_DIR / "data" / "valuation_test_predictions (1).csv",
-        BASE_DIR / "valuation_test_predictions.csv",
-        BASE_DIR / "valuation_test_predictions (1).csv",
-    ],
-    "coefficients": [
-        BASE_DIR / "data" / "valuation_final_model_coefficients.csv",
-        BASE_DIR / "data" / "valuation_final_model_coefficients (1).csv",
-        BASE_DIR / "valuation_final_model_coefficients.csv",
-        BASE_DIR / "valuation_final_model_coefficients (1).csv",
-    ],
-}
-
-
-def first_existing_path(path_list):
-    for path in path_list:
-        if path.exists():
-            return path
+# FILE HELPERS
+def find_first_file(candidates):
+    for filename in candidates:
+        possible_paths = [
+            Path(filename),
+            Path(".") / filename,
+            Path("data") / filename,
+            Path(__file__).parent.parent / filename,
+            Path(__file__).parent.parent / "data" / filename,
+            Path(__file__).parent.parent / "models" / filename,
+        ]
+        for path in possible_paths:
+            if path.exists():
+                return path
     return None
 
 
-def require_path(key: str) -> Path:
-    path = first_existing_path(CANDIDATE_PATHS[key])
-    if path is None:
-        searched = "\n".join(str(p) for p in CANDIDATE_PATHS[key])
-        st.error(
-            f"Could not find the required file for '{key}'.\n\n"
-            f"Searched these locations:\n{searched}"
-        )
-        st.stop()
-    return path
-
-
-# LOAD DATA
 @st.cache_data
-def load_csv(csv_path: Path):
-    return pd.read_csv(csv_path)
+def load_optional_csv(candidates):
+    path = find_first_file(candidates)
+    if path is None:
+        return None, None
+    return pd.read_csv(path), path.name
 
 
-comparison_path = require_path("model_comparison")
-predictions_path = require_path("test_predictions")
-coefficients_path = require_path("coefficients")
+# OPTIONAL FILES
+comparison_df, comparison_file = load_optional_csv([
+    "valuation_model_comparison.csv",
+    "model_comparison_results.csv",
+    "model_comparison.csv",
+    "valuation_evaluation_metrics.csv",
+])
 
-comparison_df = load_csv(comparison_path)
-predictions_df = load_csv(predictions_path)
-coefficients_df = load_csv(coefficients_path)
+pred_df, pred_file = load_optional_csv([
+    "valuation_test_predictions.csv",
+])
 
-
-# REQUIRED COLUMNS
-comparison_required = {
-    "model",
-    "train_accuracy",
-    "test_accuracy",
-    "train_f1",
-    "test_f1",
-}
-
-predictions_required = {
-    "ticker",
-    "year",
-    "valuation_score",
-    "actual_valuation_label",
-    "predicted_valuation_label",
-}
-
-coefficients_required = {
-    "feature",
-    "coefficient_class_0",
-    "coefficient_class_1",
-    "coefficient_class_2",
-}
-
-missing_comparison = comparison_required - set(comparison_df.columns)
-missing_predictions = predictions_required - set(predictions_df.columns)
-missing_coefficients = coefficients_required - set(coefficients_df.columns)
-
-if missing_comparison:
-    st.error(f"valuation_model_comparison_results.csv is missing columns: {sorted(missing_comparison)}")
-    st.stop()
-
-if missing_predictions:
-    st.error(f"valuation_test_predictions.csv is missing columns: {sorted(missing_predictions)}")
-    st.stop()
-
-if missing_coefficients:
-    st.error(f"valuation_final_model_coefficients.csv is missing columns: {sorted(missing_coefficients)}")
-    st.stop()
+coef_df, coef_file = load_optional_csv([
+    "valuation_final_model_coefficients.csv",
+    "valuation_final_model_coefficients (1).csv",
+])
 
 
 # HELPERS
-CLASS_LABELS = {
-    0: "Overvalued",
-    1: "Fairly Valued",
-    2: "Undervalued",
-}
+def find_column(df, candidates):
+    if df is None:
+        return None
+    lower_map = {col.lower(): col for col in df.columns}
+    for candidate in candidates:
+        if candidate.lower() in lower_map:
+            return lower_map[candidate.lower()]
+    return None
 
 
-def format_decimal(x, decimals=3):
-    if pd.isna(x):
+def normalize_label_series(series):
+    mapping = {
+        0: "Overvalued",
+        1: "Fairly valued",
+        2: "Undervalued",
+        "0": "Overvalued",
+        "1": "Fairly valued",
+        "2": "Undervalued",
+        "overvalued": "Overvalued",
+        "fairly valued": "Fairly valued",
+        "fairly_valued": "Fairly valued",
+        "undervalued": "Undervalued",
+    }
+    return series.map(lambda x: mapping.get(x, mapping.get(str(x).lower(), x)))
+
+
+def make_confusion_matrix(df):
+    actual_col = find_column(df, ["actual_label", "actual", "y_true", "true_label", "label_true"])
+    predicted_col = find_column(df, ["predicted_label", "predicted", "y_pred", "prediction", "label_pred"])
+
+    if actual_col is None or predicted_col is None:
+        return None
+
+    actual = normalize_label_series(df[actual_col])
+    predicted = normalize_label_series(df[predicted_col])
+
+    order = ["Overvalued", "Fairly valued", "Undervalued"]
+    cm = pd.crosstab(
+        pd.Categorical(actual, categories=order),
+        pd.Categorical(predicted, categories=order),
+        dropna=False,
+    )
+    cm.index.name = "Actual"
+    cm.columns.name = "Predicted"
+    return cm
+
+
+def compute_basic_metrics(df):
+    actual_col = find_column(df, ["actual_label", "actual", "y_true", "true_label", "label_true"])
+    predicted_col = find_column(df, ["predicted_label", "predicted", "y_pred", "prediction", "label_pred"])
+
+    if actual_col is None or predicted_col is None:
+        return None
+
+    actual = normalize_label_series(df[actual_col]).astype(str)
+    predicted = normalize_label_series(df[predicted_col]).astype(str)
+
+    valid_mask = actual.notna() & predicted.notna()
+    actual = actual[valid_mask]
+    predicted = predicted[valid_mask]
+
+    if len(actual) == 0:
+        return None
+
+    accuracy = (actual == predicted).mean()
+
+    classes = sorted(set(actual.unique()).union(set(predicted.unique())))
+    per_class = []
+    for cls in classes:
+        tp = ((actual == cls) & (predicted == cls)).sum()
+        fp = ((actual != cls) & (predicted == cls)).sum()
+        fn = ((actual == cls) & (predicted != cls)).sum()
+
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+
+        per_class.append({
+            "Class": cls,
+            "Precision": precision,
+            "Recall": recall,
+            "F1": f1,
+        })
+
+    macro_f1 = pd.DataFrame(per_class)["F1"].mean()
+
+    return {
+        "accuracy": accuracy,
+        "macro_f1": macro_f1,
+        "n_obs": len(actual),
+        "per_class": pd.DataFrame(per_class),
+    }
+
+
+def extract_model_column(df):
+    return find_column(df, ["model", "model_name", "estimator"])
+
+
+def extract_metric_column(df, candidates):
+    return find_column(df, candidates)
+
+
+def format_pct(x):
+    try:
+        return f"{100 * float(x):.1f}%"
+    except Exception:
         return "N/A"
-    return f"{x:,.{decimals}f}"
 
 
-def format_percent(x, decimals=1):
-    if pd.isna(x):
+def format_num(x, digits=3):
+    try:
+        return f"{float(x):.{digits}f}"
+    except Exception:
         return "N/A"
-    return f"{x:.{decimals}%}"
 
 
-def prettify_feature_name(feature: str) -> str:
-    return (
-        feature.replace("_", " ")
-        .replace("roa", "ROA")
-        .title()
-        .replace("Roa", "ROA")
-    )
+# TOP SUMMARY
+top1, top2, top3, top4 = st.columns(4)
+top1.metric("Final Model", "Logistic Regression")
+top2.metric("Task Type", "3-Class Classification")
+top3.metric("Sector Focus", "Healthcare")
+top4.metric("Primary App Goal", "Valuation + Peers + Risk")
 
+st.divider()
 
-def label_name(label):
-    return CLASS_LABELS.get(label, str(label))
-
-
-def build_confusion_matrix_df(pred_df: pd.DataFrame):
-    labels = [0, 1, 2]
-    cm = confusion_matrix(
-        pred_df["actual_valuation_label"],
-        pred_df["predicted_valuation_label"],
-        labels=labels,
-    )
-
-    cm_df = pd.DataFrame(
-        cm,
-        index=[f"Actual: {label_name(x)}" for x in labels],
-        columns=[f"Predicted: {label_name(x)}" for x in labels],
-    )
-    return cm_df
-
-
-def build_class_summary(pred_df: pd.DataFrame):
-    labels = [0, 1, 2]
-    rows = []
-
-    for label in labels:
-        actual_mask = pred_df["actual_valuation_label"] == label
-        total_actual = actual_mask.sum()
-
-        if total_actual == 0:
-            recall = None
-        else:
-            correct = (
-                (pred_df["actual_valuation_label"] == label)
-                & (pred_df["predicted_valuation_label"] == label)
-            ).sum()
-            recall = correct / total_actual
-
-        pred_mask = pred_df["predicted_valuation_label"] == label
-        total_pred = pred_mask.sum()
-
-        if total_pred == 0:
-            precision = None
-        else:
-            correct_pred = (
-                (pred_df["actual_valuation_label"] == label)
-                & (pred_df["predicted_valuation_label"] == label)
-            ).sum()
-            precision = correct_pred / total_pred
-
-        rows.append(
-            {
-                "Class": label_name(label),
-                "Support": total_actual,
-                "Precision": precision,
-                "Recall": recall,
-            }
-        )
-
-    return pd.DataFrame(rows)
-
-
-def build_feature_groups():
-    return pd.DataFrame(
-        [
-            {
-                "Feature Group": "Profitability",
-                "Example Features": "ROA, Operating Margin",
-                "Why It Matters": "Captures operating strength and return efficiency."
-            },
-            {
-                "Feature Group": "Leverage / Liquidity",
-                "Example Features": "Debt to Assets, Current Ratio",
-                "Why It Matters": "Helps assess financial health and balance-sheet flexibility."
-            },
-            {
-                "Feature Group": "Valuation Multiples",
-                "Example Features": "Price to Sales, Price to Book",
-                "Why It Matters": "Measures how richly or cheaply the market prices the firm."
-            },
-            {
-                "Feature Group": "Growth",
-                "Example Features": "Revenue Growth",
-                "Why It Matters": "Adds business momentum and expansion context."
-            },
-            {
-                "Feature Group": "Change Features",
-                "Example Features": "ROA Change, Operating Margin Change, Debt to Assets Change",
-                "Why It Matters": "Captures recent improvement or deterioration in fundamentals."
-            },
-            {
-                "Feature Group": "Peer-Relative Features",
-                "Example Features": "ROA Rel, Operating Margin Rel, Debt to Assets Rel, Price to Sales Rel, Price to Book Rel",
-                "Why It Matters": "Measures the company relative to peer benchmarks, not just on a standalone basis."
-            },
-        ]
-    )
-
-
-def build_data_sources_df():
-    return pd.DataFrame(
-        [
-            {
-                "Source": "WRDS / Wharton (Compustat)",
-                "What It Provided": "Firm-level financial statement data and accounting fundamentals.",
-                "Why It Matters": "Used to build the structured financial feature set for valuation."
-            },
-            {
-                "Source": "yfinance",
-                "What It Provided": "Market-based inputs such as price history and related market fields.",
-                "Why It Matters": "Used to enrich the company dataset with market context."
-            },
-            {
-                "Source": "Kenneth R. French Data Library",
-                "What It Provided": "Factor data used for the CAPM/risk side of the app.",
-                "Why It Matters": "Supports market-risk analysis and factor-based interpretation."
-            },
-        ]
-    )
-
-
-def build_pipeline_df():
-    return pd.DataFrame(
-        [
-            {"Step": "1. Raw Data", "Description": "Collected accounting and market inputs from source datasets."},
-            {"Step": "2. Data Cleaning", "Description": "Standardized fields, aligned time periods, and prepared usable company-year observations."},
-            {"Step": "3. Feature Engineering", "Description": "Built core, change-based, and peer-relative valuation features."},
-            {"Step": "4. Label Construction", "Description": "Converted the valuation score into three classes: Overvalued, Fairly Valued, and Undervalued."},
-            {"Step": "5. Model Training", "Description": "Tested multiple classification models using a time-based train/test split."},
-            {"Step": "6. Model Selection", "Description": "Selected the final model based on out-of-sample macro F1 and overall interpretability."},
-            {"Step": "7. App Deployment", "Description": "Saved the final artifacts and connected them to Streamlit pages for interactive use."},
-        ]
-    )
-
-
-def build_alternative_models_text():
-    if comparison_df.empty:
-        return "No model comparison results available."
-
-    sorted_models = comparison_df.sort_values(["test_f1", "test_accuracy"], ascending=False).reset_index(drop=True)
-    best_model = sorted_models.iloc[0]["model"]
-
-    lines = []
-    for _, row in sorted_models.iterrows():
-        lines.append(
-            f"- **{row['model']}**: Test Accuracy = {row['test_accuracy']:.3f}, Test Macro F1 = {row['test_f1']:.3f}"
-        )
-
-    summary = (
-        f"The final selected model was **{best_model}**, chosen because it delivered the strongest out-of-sample "
-        f"macro F1 while also remaining highly interpretable for a finance-focused app."
-    )
-    return summary, lines
-
-
-def build_feature_importance_table(coef_df: pd.DataFrame):
-    coef_df = coef_df.copy()
-    coef_df["max_abs_coef"] = coef_df[
-        ["coefficient_class_0", "coefficient_class_1", "coefficient_class_2"]
-    ].abs().max(axis=1)
-    coef_df["Feature"] = coef_df["feature"].map(prettify_feature_name)
-
-    out = coef_df[["Feature", "max_abs_coef"]].sort_values("max_abs_coef", ascending=False).reset_index(drop=True)
-    out.columns = ["Feature", "Max Absolute Coefficient"]
-    return out.head(10)
-
-
-# DERIVED OBJECTS
-best_model_row = comparison_df.sort_values(["test_f1", "test_accuracy"], ascending=False).reset_index(drop=True).iloc[0]
-best_model_name = best_model_row["model"]
-
-comparison_display = comparison_df.copy()
-comparison_display["train_accuracy"] = comparison_display["train_accuracy"].map(lambda x: f"{x:.3f}")
-comparison_display["test_accuracy"] = comparison_display["test_accuracy"].map(lambda x: f"{x:.3f}")
-comparison_display["train_f1"] = comparison_display["train_f1"].map(lambda x: f"{x:.3f}")
-comparison_display["test_f1"] = comparison_display["test_f1"].map(lambda x: f"{x:.3f}")
-
-cm_df = build_confusion_matrix_df(predictions_df)
-class_summary_df = build_class_summary(predictions_df)
-feature_groups_df = build_feature_groups()
-data_sources_df = build_data_sources_df()
-pipeline_df = build_pipeline_df()
-feature_importance_df = build_feature_importance_table(coefficients_df)
-alt_summary, alt_lines = build_alternative_models_text()
-
-
-# HEADER
-st.title("🧠 Methodology")
-st.caption("How the project moves from raw financial data to valuation outputs and app deployment.")
-
-
-# SECTION 1: PROJECT OVERVIEW
-st.markdown("## 1) Project Overview")
-
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    st.write(
-        "This project builds a financial analytics app that estimates whether a stock appears "
-        "**Overvalued**, **Fairly Valued**, or **Undervalued** based on structured financial, "
-        "market, and peer-relative features."
-    )
-    st.write(
-        "The goal is not to produce a price target. Instead, the model generates a **relative valuation classification** "
-        "based on a firm’s financial profile and how that profile compares with peers."
-    )
-
-with col2:
-    st.metric("Final Selected Model", best_model_name)
-    st.metric("Classes", "3")
-    st.metric("Test Observations", int(len(predictions_df)))
-
-
-# SECTION 2: MODELING APPROACH
-st.markdown("## 2) Modeling Approach")
-
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    st.write(
-        "The final valuation model is a **multiclass logistic regression** model trained on company-year observations. "
-        "The classes are encoded as:"
-    )
-    st.markdown(
-        """
-- **0 = Overvalued**
-- **1 = Fairly Valued**
-- **2 = Undervalued**
-"""
-    )
-    st.write(
-        "A time-based train/test split was used so that the model was evaluated on later periods rather than randomly mixed observations. "
-        "This makes the setup more realistic for applied forecasting and deployment."
-    )
-
-with col2:
-    st.info(
-        "Why logistic regression?\n\n"
-        "- Strong out-of-sample performance\n"
-        "- Interpretable coefficients\n"
-        "- Well suited for structured financial data"
-    )
-
-
-# SECTION 3: FEATURES / INPUTS
-st.markdown("## 3) Features / Inputs")
+# SECTION 1
+st.markdown("## 1) Project Objective")
 st.write(
-    "The model uses a mix of core financial metrics, change-based features, and peer-relative features. "
-    "Each group contributes different information about valuation, quality, financial health, and business momentum."
+    "ValueLens is a financial analytics app designed to evaluate healthcare companies from three complementary angles: "
+    "**valuation**, **peer comparison**, and **market risk**. "
+    "The core modeling task is a three-class classification problem that estimates whether a company appears "
+    "**Overvalued**, **Fairly valued**, or **Undervalued** based on financial and valuation features."
 )
 
-st.dataframe(feature_groups_df, use_container_width=True, hide_index=True)
+# SECTION 2
+st.markdown("## 2) What the Valuation Model Predicts")
+st.markdown(
+    """
+- **Overvalued:** the company’s feature profile looks expensive relative to the model’s learned patterns  
+- **Fairly valued:** the company’s profile appears broadly aligned with the model’s learned patterns  
+- **Undervalued:** the company’s profile looks relatively attractive compared with the model’s learned patterns  
+"""
+)
+st.caption(
+    "This is a classification model, not a direct intrinsic-value calculator. It is designed to identify valuation status based on patterns in financial data."
+)
 
-with st.expander("Top coefficient-based driver features"):
+# SECTION 3
+st.markdown("## 3) Data Sources")
+
+d1, d2, d3 = st.columns(3)
+
+with d1:
+    st.markdown("### WRDS / Compustat")
+    st.write(
+        "Used offline for historical firm fundamentals and accounting data. "
+        "These data supported dataset construction, feature engineering, and model training."
+    )
+
+with d2:
+    st.markdown("### yfinance")
+    st.write(
+        "Used for public/free market data components. "
+        "This supports deployment-safe market-based analytics and optional live/public updates."
+    )
+
+with d3:
+    st.markdown("### Kenneth R. French Data Library")
+    st.write(
+        "Used for factor-based risk modeling inputs that support CAPM-style market risk analysis."
+    )
+
+st.caption(
+    "The deployed app does not rely on WRDS at runtime. WRDS was used offline to build and train the project artifacts; the app runs from saved CSV/PKL outputs and public/free sources where applicable."
+)
+
+# SECTION 4
+st.markdown("## 4) Feature Groups / Inputs")
+
+f1, f2, f3 = st.columns(3)
+
+with f1:
+    st.markdown("### Profitability & Efficiency")
+    st.markdown(
+        """
+- ROA  
+- Operating Margin  
+- Liquidity / working-capital style indicators  
+"""
+    )
+
+with f2:
+    st.markdown("### Growth & Change Features")
+    st.markdown(
+        """
+- Revenue Growth  
+- Year-over-year changes in key ratios  
+- Directional changes in operating performance  
+"""
+    )
+
+with f3:
+    st.markdown("### Relative Valuation & Peer Context")
+    st.markdown(
+        """
+- Price to Sales  
+- Price to Book  
+- Peer-relative versions of selected metrics  
+- Relative leverage / profitability comparisons  
+"""
+    )
+
+st.caption(
+    "These feature groups were designed to capture not only a company’s own financial profile, but also how that profile compares with peers."
+)
+
+# SECTION 5
+st.markdown("## 5) Final Model Choice")
+st.write(
+    "The final model used in the app is **Logistic Regression**. "
+    "It was selected because it offered a strong balance of performance, interpretability, and clean deployment. "
+    "Compared with more complex alternatives, logistic regression made it easier to explain why a company was classified into a given valuation category."
+)
+
+# SECTION 6
+st.markdown("## 6) Model Evaluation")
+
+basic_metrics = compute_basic_metrics(pred_df) if pred_df is not None else None
+
+if basic_metrics is not None:
+    e1, e2, e3 = st.columns(3)
+    e1.metric("Test Accuracy", format_pct(basic_metrics["accuracy"]))
+    e2.metric("Macro F1", format_num(basic_metrics["macro_f1"], 3))
+    e3.metric("Test Observations", str(basic_metrics["n_obs"]))
+else:
+    st.info(
+        "Primary evaluation metrics were not computed on-page because a usable prediction file was not found or did not contain the required columns."
+    )
+
+if basic_metrics is not None:
+    st.markdown("### Per-Class Performance")
+    per_class_df = basic_metrics["per_class"].copy()
     st.dataframe(
-        feature_importance_df.style.format({"Max Absolute Coefficient": "{:,.3f}"}),
+        per_class_df.style.format({
+            "Precision": "{:.3f}",
+            "Recall": "{:.3f}",
+            "F1": "{:.3f}",
+        }),
         use_container_width=True,
         hide_index=True,
     )
 
+# OPTIONAL: CONFUSION MATRIX
+st.markdown("### OPTIONAL: Confusion Matrix")
+cm = make_confusion_matrix(pred_df) if pred_df is not None else None
 
-# SECTION 4: MODEL OUTPUT & INTERPRETATION
-st.markdown("## 4) Model Output & Interpretation")
-
-col1, col2 = st.columns([1, 1])
-
-with col1:
-    st.write(
-        "The output of the valuation model is a **class prediction**, not a direct valuation multiple or price target."
+if cm is not None:
+    cm_long = (
+        cm.reset_index()
+        .melt(id_vars="Actual", var_name="Predicted", value_name="Count")
     )
+
+    heatmap = (
+        alt.Chart(cm_long)
+        .mark_rect()
+        .encode(
+            x=alt.X("Predicted:N", title="Predicted Label"),
+            y=alt.Y("Actual:N", title="Actual Label"),
+            color=alt.Color("Count:Q", title="Count"),
+            tooltip=["Actual", "Predicted", "Count"],
+        )
+        .properties(height=320)
+    )
+
+    text = (
+        alt.Chart(cm_long)
+        .mark_text(fontSize=13)
+        .encode(
+            x="Predicted:N",
+            y="Actual:N",
+            text="Count:Q",
+            color=alt.condition(
+                alt.datum.Count > cm_long["Count"].mean(),
+                alt.value("white"),
+                alt.value("black"),
+            ),
+        )
+    )
+
+    st.altair_chart(heatmap + text, use_container_width=True)
+else:
+    st.caption(
+        "Confusion matrix not shown because `valuation_test_predictions.csv` was not found or did not contain usable actual/predicted label columns."
+    )
+
+# SECTION 7
+st.markdown("## 7) Alternative Models Tested")
+
+if comparison_df is not None:
+    model_col = extract_model_column(comparison_df)
+    accuracy_col = extract_metric_column(comparison_df, ["accuracy", "test_accuracy", "acc"])
+    f1_col = extract_metric_column(comparison_df, ["macro_f1", "f1", "test_f1"])
+
+    st.caption(f"Loaded comparison file: `{comparison_file}`")
+
+    show_cols = [col for col in [model_col, accuracy_col, f1_col] if col is not None]
+    comparison_display = comparison_df.copy()
+
+    if model_col is not None and accuracy_col is not None:
+        comparison_display = comparison_display.sort_values(accuracy_col, ascending=False)
+
+    if show_cols:
+        st.dataframe(
+            comparison_display[show_cols],
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.dataframe(comparison_display, use_container_width=True, hide_index=True)
+
+    st.write(
+        "Alternative models were tested to compare predictive performance and deployment tradeoffs. "
+        "Even when another model looked competitive, logistic regression remained attractive because it was easier to explain and integrate into the app."
+    )
+else:
+    st.write(
+        "Multiple models were evaluated during development, but the final deployment version emphasizes logistic regression because it provided a good tradeoff between predictive usefulness and interpretability."
+    )
+
+# SECTION 8
+st.markdown("## 8) Model Explanation / Coefficient-Based Insight")
+
+if coef_df is not None:
+    st.caption(f"Loaded coefficient file: `{coef_file}`")
+
+    available_class_cols = [
+        col for col in coef_df.columns
+        if col.startswith("coefficient_class_")
+    ]
+
+    if "feature" in coef_df.columns and available_class_cols:
+        selected_class = st.selectbox(
+            "Choose a valuation class to inspect",
+            options=available_class_cols,
+            format_func=lambda x: {
+                "coefficient_class_0": "Overvalued",
+                "coefficient_class_1": "Fairly valued",
+                "coefficient_class_2": "Undervalued",
+            }.get(x, x),
+        )
+
+        coef_display = coef_df[["feature", selected_class]].copy()
+        coef_display["abs_coef"] = coef_display[selected_class].abs()
+        coef_display = coef_display.sort_values("abs_coef", ascending=False).head(12)
+
+        coef_chart = (
+            alt.Chart(coef_display)
+            .mark_bar()
+            .encode(
+                x=alt.X(f"{selected_class}:Q", title="Coefficient"),
+                y=alt.Y("feature:N", sort="-x", title=None),
+                tooltip=["feature", alt.Tooltip(selected_class, format=".4f")],
+            )
+            .properties(height=360)
+        )
+
+        st.altair_chart(coef_chart, use_container_width=True)
+        st.caption(
+            "These coefficients help show which features most strongly influence the model for the selected class. "
+            "Larger absolute values indicate stronger directional influence in the classification rule."
+        )
+    else:
+        st.info("Coefficient file was found, but it does not have the expected structure.")
+else:
+    st.write(
+        "The app can also explain valuation outputs using exported coefficient data from the final logistic regression model. "
+        "If the coefficient CSV is present in the app folder, this section can visualize class-specific model drivers."
+    )
+
+# SECTION 9
+st.markdown("## 9) Workflow Summary")
+
+with st.expander("Show pipeline summary"):
     st.markdown(
         """
-- **Overvalued**: the company’s feature profile looks expensive relative to the model’s learned patterns
-- **Fairly Valued**: the company appears broadly in line with expected valuation conditions
-- **Undervalued**: the company’s feature profile looks relatively attractive given the model inputs
+1. **Collect historical financial and market data** using course-approved sources  
+2. **Construct cleaned modeling datasets** and engineer ratios, change features, and peer-relative features  
+3. **Train and compare multiple models** offline using the prepared training data  
+4. **Export deployment-safe artifacts** such as CSV files and saved model objects  
+5. **Deploy the app** using saved files plus public/free sources where appropriate  
 """
     )
 
-with col2:
-    st.info(
-        "On the Valuation page, the app shows:\n\n"
-        "- the predicted valuation class\n"
-        "- model confidence / class probabilities\n"
-        "- key drivers of the decision"
-    )
+# SECTION 10
+st.markdown("## 10) Limitations")
 
-
-# SECTION 5: MODEL EVALUATION
-st.markdown("## 5) Model Evaluation")
-
-metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
-
-with metric_col1:
-    st.metric("Final Test Accuracy", format_percent(best_model_row["test_accuracy"], 1))
-
-with metric_col2:
-    st.metric("Final Test Macro F1", format_decimal(best_model_row["test_f1"], 3))
-
-with metric_col3:
-    st.metric("Final Train Accuracy", format_percent(best_model_row["train_accuracy"], 1))
-
-with metric_col4:
-    st.metric("Final Train Macro F1", format_decimal(best_model_row["train_f1"], 3))
-
-st.write(
-    "The final model was selected based primarily on **out-of-sample macro F1**, which is appropriate for a multiclass setup "
-    "because it gives balanced weight across the three valuation classes."
-)
-
-st.markdown("### Class-level summary")
-class_summary_display = class_summary_df.copy()
-class_summary_display["Precision"] = class_summary_display["Precision"].map(lambda x: format_percent(x, 1))
-class_summary_display["Recall"] = class_summary_display["Recall"].map(lambda x: format_percent(x, 1))
-st.dataframe(class_summary_display, use_container_width=True, hide_index=True)
-
-# Confusion matrix
-with st.expander("Optional: Confusion matrix"):
-    st.write(
-        "The confusion matrix below is computed directly from `valuation_test_predictions.csv`. "
-        "Rows are the true classes and columns are the predicted classes."
-    )
-    st.dataframe(cm_df, use_container_width=True)
-
-
-# SECTION 6: ALTERNATIVE MODELS TESTED
-st.markdown("## 6) Alternative Models Tested")
-
-st.write(
-    "Several classification models were evaluated before selecting the final model. "
-    "This section shows that the model choice was intentional rather than arbitrary."
-)
-
-st.dataframe(comparison_display, use_container_width=True, hide_index=True)
-
-st.write(alt_summary)
-for line in alt_lines:
-    st.markdown(line)
-
-
-# SECTION 7: DATA SOURCES
-st.markdown("## 7) Data Sources")
-
-st.dataframe(data_sources_df, use_container_width=True, hide_index=True)
-
-
-# SECTION 8: PIPELINE / WORKFLOW
-st.markdown("## 8) Pipeline / Workflow")
-
-st.dataframe(pipeline_df, use_container_width=True, hide_index=True)
-
-
-# SECTION 9: LIMITATIONS
-st.markdown("## 9) Limitations")
-
-with st.expander("Show limitations"):
+with st.expander("Show limitations and caveats"):
     st.markdown(
         """
-- The model is trained on historical company-year observations, so future market conditions may differ from the training period.
-- The output is a **classification signal**, not a direct estimate of intrinsic value or a guaranteed investment recommendation.
-- Relative valuation depends on the quality of the engineered peer and market features used in the pipeline.
-- CAPM and peer benchmarking are simplifications; real-world valuation is influenced by many qualitative and forward-looking factors not fully captured here.
-- Even strong out-of-sample metrics do not eliminate the possibility of regime shifts, changing fundamentals, or model degradation over time.
+- The valuation model is a **classification tool**, not a direct intrinsic value calculator  
+- Model outputs depend on the selected features, training period, and class definitions  
+- Peer-based comparisons are only as strong as the chosen comparison group  
+- CAPM-style risk metrics simplify reality and do not capture all sources of uncertainty  
+- Public/live add-ons should be treated as **supplemental snapshots**, not replacements for the main offline analysis  
 """
     )
 
-
-# CTA
-st.markdown("## Explore More")
-st.markdown(
-    """
-- **Valuation:** See the model-based valuation classification for a selected company.
-- **Peer Comparison:** Compare company metrics against peer medians and percentile positions.
-- **Risk (CAPM):** Review beta, alpha, and CAPM-based market-risk interpretation.
-"""
+st.divider()
+st.caption(
+    "Recommended supporting files for this page: `valuation_test_predictions.csv`, "
+    "`valuation_model_comparison.csv` (or similar comparison file), and "
+    "`valuation_final_model_coefficients.csv`."
 )
