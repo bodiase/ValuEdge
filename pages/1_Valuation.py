@@ -1,3 +1,5 @@
+# pages/1_Valuation.py
+
 import streamlit as st
 import pandas as pd
 import pickle
@@ -59,6 +61,11 @@ TICKER_NAME_MAP = {
     "ALGN": "Align Technology, Inc.",
 }
 
+# SIDEBAR
+st.sidebar.markdown("---")
+st.sidebar.markdown(f"### Current ticker: `{ticker}`")
+
+
 # FILE HELPERS
 def find_file(filename):
     possible_paths = [
@@ -75,6 +82,7 @@ def find_file(filename):
             return path
     return None
 
+
 @st.cache_resource
 def load_model():
     model_path = find_file("final_model.pkl")
@@ -82,6 +90,7 @@ def load_model():
         raise FileNotFoundError("final_model.pkl not found")
     with open(model_path, "rb") as f:
         return pickle.load(f)
+
 
 @st.cache_resource
 def load_feature_cols():
@@ -91,12 +100,14 @@ def load_feature_cols():
     with open(feature_cols_path, "rb") as f:
         return pickle.load(f)
 
+
 @st.cache_data
 def load_input_data():
     csv_path = find_file("ticker_history_input.csv")
     if csv_path is None:
         raise FileNotFoundError("ticker_history_input.csv not found")
     return pd.read_csv(csv_path)
+
 
 @st.cache_data
 def load_coefficients():
@@ -110,6 +121,7 @@ def load_coefficients():
             return pd.read_csv(coeff_path)
     raise FileNotFoundError("valuation_final_model_coefficients.csv not found")
 
+
 # HELPERS
 def company_display_name(ticker_value):
     company_name = TICKER_NAME_MAP.get(str(ticker_value).upper(), "")
@@ -117,14 +129,17 @@ def company_display_name(ticker_value):
         return f"{ticker_value} ({company_name})"
     return str(ticker_value)
 
+
 def label_with_color(label):
     color = CLASS_COLORS.get(label, "blue")
     return f":{color}[**{label}**]"
+
 
 def format_prob_table(proba_df):
     display_df = proba_df.copy()
     display_df["probability"] = display_df["probability"].map(lambda x: f"{x:.1%}")
     return display_df[["label", "probability"]]
+
 
 def prettify_feature_name(feature):
     return (
@@ -133,6 +148,7 @@ def prettify_feature_name(feature):
         .title()
         .replace("Roa", "ROA")
     )
+
 
 def driver_theme(feature):
     mapping = {
@@ -155,6 +171,7 @@ def driver_theme(feature):
     }
     return mapping.get(feature, prettify_feature_name(feature).lower())
 
+
 def build_top_driver_summary(top_drivers):
     if top_drivers.empty:
         return "No major model drivers were available."
@@ -168,6 +185,7 @@ def build_top_driver_summary(top_drivers):
     if len(themes) == 2:
         return f"{themes[0]} and {themes[1]}"
     return f"{themes[0]}, {themes[1]}, and {themes[2]}"
+
 
 def make_interpretation(label, driver_df):
     top_driver_text = build_top_driver_summary(driver_df.head(3))
@@ -200,6 +218,7 @@ def make_interpretation(label, driver_df):
 
     return "The model produced a valuation result for the latest full year."
 
+
 def summarize_historical_signal(pred_series):
     avg_class = pred_series.mean()
     if avg_class < 0.67:
@@ -208,14 +227,11 @@ def summarize_historical_signal(pred_series):
         return "Fairly valued"
     return "Undervalued"
 
+
 def get_majority_label(pred_series):
     majority_class = pred_series.mode().iloc[0]
     return CLASS_LABELS[int(majority_class)]
 
-def get_latest_row_for_ticker(df, ticker_value):
-    ticker_df = df[df["ticker"].astype(str).str.upper() == str(ticker_value).upper()].copy()
-    ticker_df = ticker_df.sort_values("year")
-    return ticker_df.iloc[-1]
 
 def build_probability_df(model, probabilities):
     try:
@@ -229,6 +245,7 @@ def build_probability_df(model, probabilities):
     proba_df["label"] = proba_df["class_id"].map(CLASS_LABELS)
     proba_df = proba_df.sort_values("probability", ascending=False).reset_index(drop=True)
     return proba_df
+
 
 def compute_driver_chart_data(model, coef_df, feature_cols, selected_row, pred_class):
     scaler = model.named_steps["scaler"]
@@ -254,6 +271,7 @@ def compute_driver_chart_data(model, coef_df, feature_cols, selected_row, pred_c
     driver_df = driver_df.sort_values("abs_contribution", ascending=False).reset_index(drop=True)
     return driver_df
 
+
 # LOAD DATA
 try:
     model = load_model()
@@ -277,7 +295,6 @@ if missing_coef_cols:
     st.error(f"valuation_final_model_coefficients.csv is missing required columns: {sorted(missing_coef_cols)}")
     st.stop()
 
-# FILTER COMPANY DATA
 company_data = valuation_df[
     valuation_df["ticker"].astype(str).str.upper() == str(ticker).upper()
 ].copy()
@@ -288,7 +305,6 @@ if company_data.empty:
 
 company_data = company_data.sort_values("year").reset_index(drop=True)
 
-# LATEST YEAR PREDICTION
 latest_row = company_data.iloc[-1].copy()
 latest_year = int(latest_row["year"])
 
@@ -310,7 +326,6 @@ top_drivers = driver_df.head(3).copy()
 top_driver_summary = build_top_driver_summary(top_drivers)
 latest_interpretation = make_interpretation(latest_label, driver_df)
 
-# HISTORICAL PREDICTIONS
 try:
     historical_X = company_data[feature_cols].astype(float).copy()
     historical_pred_class = model.predict(historical_X)
@@ -333,9 +348,10 @@ historical_majority_label = get_majority_label(result_df["predicted_class"])
 # PAGE
 st.title("Valuation Assessment")
 st.markdown(f"### Current ticker: `{company_display_name(ticker)}`")
-st.caption("This page highlights the model result for the latest full year first, then shows how the valuation signal has looked across the company’s historical observations.")
+st.caption(
+    "This page highlights the model result for the latest full year first, then shows how the valuation signal has looked across the company’s historical observations."
+)
 
-# SECTION 1
 st.markdown("## 1) Latest-Year Valuation Result")
 st.write(f"The highlighted result below is based on the **most recent full year in the app dataset: {latest_year}**.")
 
@@ -353,16 +369,14 @@ with c3:
 
 st.markdown("**Class probabilities for the latest full year**")
 st.dataframe(
-    format_probability_df := format_prob_table(latest_proba_df),
+    format_prob_table(latest_proba_df),
     use_container_width=True,
     hide_index=True,
 )
 
-# SECTION 2
 st.markdown("## 2) Interpretation")
 st.info(latest_interpretation)
 
-# SECTION 3
 st.markdown("## 3) What Drove This Latest-Year Result?")
 st.markdown(f"**Top Drivers:** {top_driver_summary}")
 st.caption(
@@ -438,7 +452,6 @@ with st.expander("See latest-year driver details"):
         hide_index=True,
     )
 
-# SECTION 4
 st.markdown("## 4) Historical Valuation Context")
 
 h1, h2, h3 = st.columns(3)
@@ -492,18 +505,16 @@ distribution_chart = (
 
 st.altair_chart(distribution_chart, use_container_width=True)
 
-# SECTION 5
 st.markdown("## 5) Historical Inputs")
 with st.expander("See historical input data used for the year-by-year predictions"):
     st.dataframe(company_data, use_container_width=True, hide_index=True)
 
-# SECTION 6
 st.markdown("## 6) Explore More")
 st.markdown(
     """
-- **Peer Comparison:** Benchmark the selected company against peer medians across key financial metrics.  
-- **Risk Analysis:** Review beta, alpha, and R-squared to understand the company’s CAPM risk profile.  
-- **About / Methodology:** See how the valuation model, data pipeline, and supporting files were built.  
+- **Peer Comparison:** Benchmark the selected company against peer averages across key financial metrics  
+- **Risk Analysis:** Review beta, alpha, and R-squared to understand the company’s CAPM risk profile  
+- **Methodology:** See how the valuation model, data pipeline, and supporting files were built  
 """
 )
 
