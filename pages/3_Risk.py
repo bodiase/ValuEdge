@@ -1,3 +1,5 @@
+# pages/3_Risk.py
+
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -47,6 +49,11 @@ TICKER_NAME_MAP = {
     "IDXX": "IDEXX Laboratories, Inc.",
     "ALGN": "Align Technology, Inc.",
 }
+
+# SIDEBAR
+st.sidebar.markdown("---")
+st.sidebar.markdown(f"### Current ticker: `{ticker}`")
+
 
 # FILE HELPERS
 def find_file(filename):
@@ -364,7 +371,6 @@ st.caption(
     "This page summarizes the selected company’s CAPM-based market risk profile using beta, alpha, and R-squared."
 )
 
-# SECTION 1
 st.markdown("## 1) Key Risk Metrics")
 
 r1, r2, r3, r4 = st.columns(4)
@@ -373,13 +379,12 @@ r2.metric("Beta", safe_num(beta, 3))
 r3.metric("R-squared", safe_num(r_squared, 3))
 r4.metric("Beta Risk Label", beta_risk_label)
 
-# SECTION 2
 st.markdown("## 2) What These Metrics Mean")
 st.markdown(
     """
-- **Beta** measures how sensitive the stock has been to overall market movements.  
-- **Alpha** measures whether the stock outperformed or underperformed relative to CAPM expectations.  
-- **R-squared** measures how much of the stock’s return variation is explained by market movements.  
+- **Beta** measures how sensitive the stock has been to overall market movements  
+- **Alpha** measures whether the stock outperformed or underperformed relative to CAPM expectations  
+- **R-squared** measures how much of the stock’s return variation is explained by market movements  
 """
 )
 
@@ -387,7 +392,6 @@ st.caption(
     "CAPM is a benchmark framework for asking whether a stock’s return has been high or low relative to the amount of market risk it takes."
 )
 
-# SECTION 3
 st.markdown("## 3) Beta vs Market")
 
 beta_chart_df = pd.DataFrame({
@@ -434,17 +438,14 @@ st.caption(
     "A beta of 1.0 represents market-level sensitivity. Values below 1.0 suggest a more defensive profile, while values above 1.0 suggest higher market sensitivity."
 )
 
-# SECTION 4
 st.markdown("## 4) Interpretation")
 st.markdown(f"### {headline}")
 st.write(interpretation_text)
 
-# SECTION 5
 st.markdown("## 5) Key Takeaways")
 for takeaway in takeaways:
     st.write(f"- {takeaway}")
 
-# SECTION 6
 st.markdown("## 6) Preliminary 2026 CAPM Snapshot")
 st.warning(
     "This snapshot uses partial 2026 market data from a public/free source and should be treated as a preliminary update only. "
@@ -480,10 +481,10 @@ try:
     with st.expander("Why this section is labeled preliminary"):
         st.markdown(
             """
-- It uses only **partial 2026** data rather than a completed annual window.  
-- It uses **daily returns from yfinance** and a simple market benchmark proxy (**SPY**).  
-- The resulting beta, alpha, and R-squared estimates can move materially as more 2026 data becomes available.  
-- Use this section as a **current directional snapshot**, not as a finalized full-year CAPM estimate.  
+- It uses only **partial 2026** data rather than a completed annual window  
+- It uses **daily returns from yfinance** and a simple market benchmark proxy (**SPY**)  
+- The resulting beta, alpha, and R-squared estimates can move materially as more 2026 data becomes available  
+- Use this section as a **current directional snapshot**, not as a finalized full-year CAPM estimate  
 """
         )
 
@@ -495,12 +496,11 @@ except Exception as e:
     with st.expander("Technical details"):
         st.write(str(e))
 
-# SECTION 7
 st.markdown("## 7) Explore More")
 st.markdown(
     """
-- **Valuation Assessment:** Review the model’s latest-year valuation signal and historical valuation context.  
-- **Peer Comparison:** See how the company compares with peers across profitability, leverage, liquidity, growth, and valuation metrics.  
-- **About:** Review the project framing, data sources, and model context.  
+- **Valuation Assessment:** Review the model’s latest-year valuation signal and historical valuation context  
+- **Peer Comparison:** See how the company compares with peers across profitability, leverage, liquidity, growth, and valuation metrics  
+- **Methodology:** Review the project framing, data sources, and model context  
 """
 )
