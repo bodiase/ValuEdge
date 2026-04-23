@@ -1,402 +1,459 @@
-# Generated from: 2_Peer_Comparison.ipynb
-# Converted at: 2026-04-21T19:45:43.047Z
-# Next step (optional): refactor into modules & generate tests with RunCell
-# Quick start: pip install runcell
-
+import streamlit as st
+import pandas as pd
+import altair as alt
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
-import streamlit as st
+st.set_page_config(page_title="Peer Comparison", layout="wide")
 
+# GLOBAL TICKER STATE
+if "ticker" not in st.session_state:
+    st.session_state["ticker"] = "A"
 
-# PAGE CONFIG
-st.set_page_config(page_title="Peer Comparison", page_icon="📊", layout="wide")
+ticker = st.session_state["ticker"]
 
-
-# FILE PATHS
-BASE_DIR = Path(__file__).resolve().parents[1]
-
-CANDIDATE_PATHS = {
-    "peer_summary": [
-        BASE_DIR / "data" / "peer_summary.csv",
-        BASE_DIR / "peer_summary.csv",
-    ]
+# COMPANY NAMES
+TICKER_NAME_MAP = {
+    "LLY": "Eli Lilly and Company",
+    "JNJ": "Johnson & Johnson",
+    "ABBV": "AbbVie Inc.",
+    "MRK": "Merck & Co., Inc.",
+    "UNH": "UnitedHealth Group Incorporated",
+    "AMGN": "Amgen Inc.",
+    "ABT": "Abbott Laboratories",
+    "TMO": "Thermo Fisher Scientific Inc.",
+    "GILD": "Gilead Sciences, Inc.",
+    "ISRG": "Intuitive Surgical, Inc.",
+    "CVS": "CVS Health Corporation",
+    "BMY": "Bristol-Myers Squibb Company",
+    "MDT": "Medtronic plc",
+    "CI": "Cigna Group",
+    "ZTS": "Zoetis Inc.",
+    "SYK": "Stryker Corporation",
+    "REGN": "Regeneron Pharmaceuticals, Inc.",
+    "HCA": "HCA Healthcare, Inc.",
+    "DHR": "Danaher Corporation",
+    "HUM": "Humana Inc.",
+    "VRTX": "Vertex Pharmaceuticals Incorporated",
+    "MRNA": "Moderna, Inc.",
+    "PFE": "Pfizer Inc.",
+    "BIIB": "Biogen Inc.",
+    "ILMN": "Illumina, Inc.",
+    "EW": "Edwards Lifesciences Corporation",
+    "A": "Agilent Technologies, Inc.",
+    "DXCM": "DexCom, Inc.",
+    "IDXX": "IDEXX Laboratories, Inc.",
+    "ALGN": "Align Technology, Inc.",
 }
 
 
-def first_existing_path(path_list):
-    for path in path_list:
+# FILE HELPERS
+def find_file(filename):
+    possible_paths = [
+        Path(filename),
+        Path(".") / filename,
+        Path("data") / filename,
+        Path(__file__).parent.parent / filename,
+        Path(__file__).parent.parent / "data" / filename,
+    ]
+    for path in possible_paths:
         if path.exists():
             return path
     return None
 
 
-def require_path(key: str) -> Path:
-    path = first_existing_path(CANDIDATE_PATHS[key])
-    if path is None:
-        searched = "\n".join(str(p) for p in CANDIDATE_PATHS[key])
-        st.error(
-            f"Could not find the required file for '{key}'.\n\n"
-            f"Searched these locations:\n{searched}"
-        )
-        st.stop()
-    return path
-
-
-# LOAD DATA
 @st.cache_data
-def load_csv(csv_path: Path):
+def load_input_data():
+    csv_path = find_file("ticker_history_input.csv")
+    if csv_path is None:
+        raise FileNotFoundError("ticker_history_input.csv not found")
     return pd.read_csv(csv_path)
 
 
-peer_summary_path = require_path("peer_summary")
-peer_df = load_csv(peer_summary_path)
-
-
-# REQUIRED COLUMNS
-required_columns = {
-    "ticker",
-    "year",
-    "roa", "roa_median", "roa_pct",
-    "operating_margin", "operating_margin_median", "operating_margin_pct",
-    "debt_to_assets", "debt_to_assets_median", "debt_to_assets_pct",
-    "current_ratio", "current_ratio_median", "current_ratio_pct",
-    "price_to_sales", "price_to_sales_median", "price_to_sales_pct",
-    "price_to_book", "price_to_book_median", "price_to_book_pct",
-    "revenue_growth", "revenue_growth_median", "revenue_growth_pct",
-}
-
-missing_columns = required_columns - set(peer_df.columns)
-if missing_columns:
-    st.error(f"peer_summary.csv is missing required columns: {sorted(missing_columns)}")
-    st.stop()
-
-
 # HELPERS
-def format_decimal(x, decimals=3):
-    if pd.isna(x):
-        return "N/A"
-    return f"{x:,.{decimals}f}"
+def company_display_name(ticker_value):
+    company_name = TICKER_NAME_MAP.get(str(ticker_value).upper(), "")
+    if company_name:
+        return f"{ticker_value} ({company_name})"
+    return str(ticker_value)
 
 
-def format_percentile(x):
-    if pd.isna(x):
-        return "N/A"
-    return f"{x:.1%}"
+def format_metric_label(metric_name):
+    mapping = {
+        "roa": "ROA",
+        "operating_margin": "Operating Margin",
+        "revenue_growth": "Revenue Growth",
+        "current_ratio": "Current Ratio",
+        "debt_to_assets": "Debt to Assets",
+        "price_to_sales": "Price to Sales",
+        "price_to_book": "Price to Book",
+    }
+    return mapping.get(metric_name, metric_name.replace("_", " ").title())
 
 
-def format_difference(company_val, peer_val, decimals=3):
-    if pd.isna(company_val) or pd.isna(peer_val):
-        return "N/A"
-    diff = company_val - peer_val
-    sign = "+" if diff > 0 else ""
-    return f"{sign}{diff:,.{decimals}f}"
+def compare_direction(metric_name, company_value, peer_value):
+    higher_is_better = {
+        "roa": True,
+        "operating_margin": True,
+        "revenue_growth": True,
+        "current_ratio": True,
+        "price_to_sales": False,
+        "price_to_book": False,
+        "debt_to_assets": False,
+    }
+
+    if pd.isna(company_value) or pd.isna(peer_value):
+        return "No comparison available"
+
+    better_when_higher = higher_is_better.get(metric_name, True)
+
+    if company_value > peer_value:
+        return "Better than peers" if better_when_higher else "More expensive / riskier than peers"
+    elif company_value < peer_value:
+        return "Worse than peers" if better_when_higher else "Cheaper / more conservative than peers"
+    return "In line with peers"
 
 
-def pct_bucket_text(x):
-    if pd.isna(x):
-        return "not available"
-    if x >= 0.80:
-        return "top quintile"
-    if x >= 0.60:
-        return "above average"
-    if x >= 0.40:
-        return "middle of the peer group"
-    if x >= 0.20:
-        return "below average"
-    return "bottom quintile"
+def style_difference(metric_name, company_value, peer_value):
+    higher_is_better = {
+        "roa": True,
+        "operating_margin": True,
+        "revenue_growth": True,
+        "current_ratio": True,
+        "price_to_sales": False,
+        "price_to_book": False,
+        "debt_to_assets": False,
+    }
+
+    if pd.isna(company_value) or pd.isna(peer_value):
+        return "neutral"
+
+    better_when_higher = higher_is_better.get(metric_name, True)
+
+    if company_value == peer_value:
+        return "neutral"
+
+    if better_when_higher:
+        return "favorable" if company_value > peer_value else "unfavorable"
+    return "favorable" if company_value < peer_value else "unfavorable"
 
 
-def compare_standard(company_val, peer_val, high_threshold=0.10):
-    if pd.isna(company_val) or pd.isna(peer_val):
-        return "in_line"
-    if peer_val == 0:
-        if company_val > 0:
-            return "above"
-        if company_val < 0:
-            return "below"
-        return "in_line"
-
-    ratio_diff = abs(company_val - peer_val) / max(abs(peer_val), 1e-9)
-    if ratio_diff <= high_threshold:
-        return "in_line"
-    return "above" if company_val > peer_val else "below"
-
-
-def compare_inverse(company_val, peer_val, high_threshold=0.10):
-    # For metrics where LOWER is usually better, like debt_to_assets or valuation multiples.
-    if pd.isna(company_val) or pd.isna(peer_val):
-        return "in_line"
-    if peer_val == 0:
-        if company_val < 0:
-            return "better"
-        if company_val > 0:
-            return "worse"
-        return "in_line"
-
-    ratio_diff = abs(company_val - peer_val) / max(abs(peer_val), 1e-9)
-    if ratio_diff <= high_threshold:
-        return "in_line"
-    return "better" if company_val < peer_val else "worse"
-
-
-def get_latest_row_for_ticker(df: pd.DataFrame, ticker: str) -> pd.Series:
-    ticker_df = df[df["ticker"] == ticker].copy()
-    ticker_df = ticker_df.sort_values("year")
-    return ticker_df.iloc[-1]
-
-
-def build_summary_table(selected_row: pd.Series) -> pd.DataFrame:
-    metrics = [
-        ("ROA", "roa", "roa_median", "roa_pct"),
-        ("Operating Margin", "operating_margin", "operating_margin_median", "operating_margin_pct"),
-        ("Debt to Assets", "debt_to_assets", "debt_to_assets_median", "debt_to_assets_pct"),
-        ("Current Ratio", "current_ratio", "current_ratio_median", "current_ratio_pct"),
-        ("Price to Sales", "price_to_sales", "price_to_sales_median", "price_to_sales_pct"),
-        ("Price to Book", "price_to_book", "price_to_book_median", "price_to_book_pct"),
-        ("Revenue Growth", "revenue_growth", "revenue_growth_median", "revenue_growth_pct"),
+def build_peer_comparison_table(company_latest, peer_latest):
+    compare_metrics = [
+        "roa",
+        "operating_margin",
+        "revenue_growth",
+        "current_ratio",
+        "debt_to_assets",
+        "price_to_sales",
+        "price_to_book",
     ]
 
     rows = []
-    for label, company_col, peer_col, pct_col in metrics:
-        company_val = selected_row[company_col]
-        peer_val = selected_row[peer_col]
-        pct_val = selected_row[pct_col]
-
-        rows.append({
-            "Metric": label,
-            "Company Value": company_val,
-            "Peer Median": peer_val,
-            "Difference": company_val - peer_val if pd.notna(company_val) and pd.notna(peer_val) else np.nan,
-            "Peer Percentile": pct_val,
-        })
+    for metric in compare_metrics:
+        if metric in company_latest.index and metric in peer_latest.index:
+            company_val = company_latest[metric]
+            peer_val = peer_latest[metric]
+            rows.append({
+                "metric_key": metric,
+                "Metric": format_metric_label(metric),
+                "Company": company_val,
+                "Peer Average": peer_val,
+                "Difference": company_val - peer_val,
+                "Signal": style_difference(metric, company_val, peer_val),
+            })
 
     return pd.DataFrame(rows)
 
 
-def build_chart_df(selected_row: pd.Series) -> pd.DataFrame:
-    metrics = [
-        ("ROA", "roa", "roa_median"),
-        ("Operating Margin", "operating_margin", "operating_margin_median"),
-        ("Debt to Assets", "debt_to_assets", "debt_to_assets_median"),
-        ("Current Ratio", "current_ratio", "current_ratio_median"),
-        ("Price to Sales", "price_to_sales", "price_to_sales_median"),
-        ("Price to Book", "price_to_book", "price_to_book_median"),
-    ]
+def style_peer_table(df):
+    def highlight_difference(row):
+        signal = row["Signal"]
+        if signal == "favorable":
+            return ["", "", "", "color: #2ca02c; font-weight: bold;"]
+        elif signal == "unfavorable":
+            return ["", "", "", "color: #d62728; font-weight: bold;"]
+        return ["", "", "", "font-weight: bold;"]
 
+    visible_df = df[["Metric", "Company", "Peer Average", "Difference"]].copy()
+
+    return visible_df.style.apply(highlight_difference, axis=1).format({
+        "Company": "{:,.4f}",
+        "Peer Average": "{:,.4f}",
+        "Difference": "{:+,.4f}",
+    })
+
+
+def build_chart_df(company_latest, peer_avg, selected_metrics):
     rows = []
-    for label, company_col, peer_col in metrics:
-        rows.append({
-            "Metric": label,
-            "Company": selected_row[company_col],
-            "Peer Median": selected_row[peer_col],
-        })
+    for metric in selected_metrics:
+        if metric in company_latest.index and metric in peer_avg.index:
+            rows.append({
+                "Metric": format_metric_label(metric),
+                "metric_key": metric,
+                "Company": company_latest[metric],
+                "Peer Average": peer_avg[metric],
+            })
 
-    return pd.DataFrame(rows)
+    if not rows:
+        return pd.DataFrame()
+
+    chart_df = pd.DataFrame(rows)
+    chart_long = chart_df.melt(
+        id_vars=["Metric", "metric_key"],
+        value_vars=["Company", "Peer Average"],
+        var_name="Group",
+        value_name="Value"
+    )
+    return chart_long
 
 
-def build_takeaways(selected_row: pd.Series):
+def build_takeaways(company_latest, peer_avg):
     takeaways = []
 
+    roa = company_latest.get("roa", None)
+    roa_peer = peer_avg.get("roa", None)
+
+    margin = company_latest.get("operating_margin", None)
+    margin_peer = peer_avg.get("operating_margin", None)
+
+    growth = company_latest.get("revenue_growth", None)
+    growth_peer = peer_avg.get("revenue_growth", None)
+
+    current_ratio = company_latest.get("current_ratio", None)
+    current_ratio_peer = peer_avg.get("current_ratio", None)
+
+    debt = company_latest.get("debt_to_assets", None)
+    debt_peer = peer_avg.get("debt_to_assets", None)
+
+    ps = company_latest.get("price_to_sales", None)
+    ps_peer = peer_avg.get("price_to_sales", None)
+
+    pb = company_latest.get("price_to_book", None)
+    pb_peer = peer_avg.get("price_to_book", None)
+
     # Profitability
-    profitability_signals = []
-    roa_cmp = compare_standard(selected_row["roa"], selected_row["roa_median"])
-    opm_cmp = compare_standard(selected_row["operating_margin"], selected_row["operating_margin_median"])
+    if pd.notna(roa) and pd.notna(roa_peer) and pd.notna(margin) and pd.notna(margin_peer):
+        if roa > roa_peer and margin > margin_peer:
+            takeaways.append(
+                "The company looks stronger than peers on core profitability measures, with both ROA and operating margin above peer averages. "
+                "That suggests better operating efficiency and earnings generation relative to the comparison group."
+            )
+        elif roa < roa_peer and margin < margin_peer:
+            takeaways.append(
+                "The company looks weaker than peers on core profitability measures, with both ROA and operating margin below peer averages. "
+                "That means the firm may need stronger growth or strategic advantages to justify premium valuation."
+            )
+        else:
+            takeaways.append(
+                "Profitability signals are mixed relative to peers. "
+                "That suggests the company has some operating strengths, but not a uniformly superior profitability profile."
+            )
 
-    if roa_cmp == "above":
-        profitability_signals.append("ROA is above the peer median")
-    elif roa_cmp == "below":
-        profitability_signals.append("ROA is below the peer median")
-
-    if opm_cmp == "above":
-        profitability_signals.append("operating margin is above the peer median")
-    elif opm_cmp == "below":
-        profitability_signals.append("operating margin is below the peer median")
-
-    if roa_cmp == "above" and opm_cmp == "above":
-        takeaways.append(
-            f"Profitability looks stronger than peers. The company ranks in the {pct_bucket_text(selected_row['roa_pct'])} on ROA and in the {pct_bucket_text(selected_row['operating_margin_pct'])} on operating margin."
-        )
-    elif roa_cmp == "below" and opm_cmp == "below":
-        takeaways.append(
-            f"Profitability looks weaker than peers. Both ROA and operating margin sit below peer medians."
-        )
-    elif profitability_signals:
-        takeaways.append(
-            "Profitability is mixed relative to peers: " + "; ".join(profitability_signals) + "."
-        )
-
-    # Balance sheet / liquidity
-    leverage_cmp = compare_inverse(selected_row["debt_to_assets"], selected_row["debt_to_assets_median"])
-    liquidity_cmp = compare_standard(selected_row["current_ratio"], selected_row["current_ratio_median"])
-
-    if leverage_cmp == "better" and liquidity_cmp == "above":
-        takeaways.append(
-            f"The balance-sheet profile looks relatively strong, with lower leverage than peers and stronger liquidity."
-        )
-    elif leverage_cmp == "worse" and liquidity_cmp == "below":
-        takeaways.append(
-            f"The balance-sheet profile looks weaker than peers, with higher leverage and weaker liquidity."
-        )
-    elif leverage_cmp == "better":
-        takeaways.append(
-            f"Leverage looks more conservative than peers, with debt-to-assets below the peer median."
-        )
-    elif leverage_cmp == "worse":
-        takeaways.append(
-            f"Leverage looks heavier than peers, with debt-to-assets above the peer median."
-        )
-    elif liquidity_cmp == "above":
-        takeaways.append(
-            f"Liquidity looks stronger than peers, with the current ratio above the peer median."
-        )
-    elif liquidity_cmp == "below":
-        takeaways.append(
-            f"Liquidity looks weaker than peers, with the current ratio below the peer median."
-        )
+    # Balance sheet
+    if pd.notna(current_ratio) and pd.notna(current_ratio_peer) and pd.notna(debt) and pd.notna(debt_peer):
+        if current_ratio > current_ratio_peer and debt < debt_peer:
+            takeaways.append(
+                "The balance-sheet profile looks stronger than peers, with better liquidity and lower leverage. "
+                "That can give the company more financial flexibility and resilience."
+            )
+        elif current_ratio < current_ratio_peer and debt > debt_peer:
+            takeaways.append(
+                "The balance-sheet profile looks weaker than peers, with lower liquidity and higher leverage. "
+                "That may reduce flexibility if operating conditions become more challenging."
+            )
+        else:
+            takeaways.append(
+                "Balance-sheet signals are mixed. "
+                "The company is not clearly more conservative or more aggressive than peers overall."
+            )
 
     # Valuation
-    ps_cmp = compare_inverse(selected_row["price_to_sales"], selected_row["price_to_sales_median"])
-    pb_cmp = compare_inverse(selected_row["price_to_book"], selected_row["price_to_book_median"])
-
-    if ps_cmp == "better" and pb_cmp == "better":
-        takeaways.append(
-            f"Valuation multiples are below peer medians, suggesting the stock trades at a relative discount."
-        )
-    elif ps_cmp == "worse" and pb_cmp == "worse":
-        takeaways.append(
-            f"Valuation multiples are above peer medians, suggesting the stock trades at a richer valuation than peers."
-        )
-    elif ps_cmp == "better" or pb_cmp == "better":
-        takeaways.append(
-            f"Valuation looks somewhat cheaper than peers on at least one major multiple."
-        )
-    elif ps_cmp == "worse" or pb_cmp == "worse":
-        takeaways.append(
-            f"Valuation looks somewhat richer than peers on at least one major multiple."
-        )
+    if pd.notna(ps) and pd.notna(ps_peer) and pd.notna(pb) and pd.notna(pb_peer):
+        if ps < ps_peer and pb < pb_peer:
+            takeaways.append(
+                "The company appears cheaper than peers on both price-to-sales and price-to-book. "
+                "That could indicate relative valuation support, although it may also reflect more cautious market expectations."
+            )
+        elif ps > ps_peer and pb > pb_peer:
+            takeaways.append(
+                "The company trades at richer valuation multiples than peers. "
+                "That suggests investors may already be pricing in stronger quality, growth, or market expectations."
+            )
+        else:
+            takeaways.append(
+                "Valuation signals are mixed relative to peers. "
+                "The stock does not look uniformly cheap or expensive across the main valuation multiples."
+            )
 
     # Growth
-    growth_cmp = compare_standard(selected_row["revenue_growth"], selected_row["revenue_growth_median"])
-    if growth_cmp == "above":
-        takeaways.append(
-            f"Revenue growth is stronger than peers, which may help justify a premium valuation if sustained."
-        )
-    elif growth_cmp == "below":
-        takeaways.append(
-            f"Revenue growth is weaker than peers, which may make strong valuation multiples harder to justify."
-        )
+    if pd.notna(growth) and pd.notna(growth_peer):
+        if growth > growth_peer:
+            takeaways.append(
+                "Revenue growth is above the peer average, which helps support the company’s investment story and may justify stronger market interest."
+            )
+        elif growth < growth_peer:
+            takeaways.append(
+                "Revenue growth is below the peer average, which may make it harder for the company to sustain premium valuation unless other strengths offset it."
+            )
+        else:
+            takeaways.append(
+                "Revenue growth is roughly in line with peers, suggesting no major growth advantage or disadvantage at the moment."
+            )
 
-    # Keep concise
-    if not takeaways:
-        takeaways.append("Most major metrics appear broadly in line with peer medians.")
     return takeaways[:4]
 
 
-# TICKER STATE
-tickers = sorted(peer_df["ticker"].dropna().unique().tolist())
+# PAGE
+st.title("Peer Comparison")
+st.markdown(f"### Current ticker: `{company_display_name(ticker)}`")
 
-if "selected_ticker" not in st.session_state:
-    st.session_state.selected_ticker = tickers[0] if tickers else None
-
-current_ticker = st.session_state.selected_ticker
-
-# HEADER
-st.title("📊 Peer Comparison")
-st.caption("Compare the selected company to peer medians and peer-relative positions.")
-
-col_a, col_b = st.columns([3, 2])
-
-with col_a:
-    st.markdown(f"### Current selected ticker: `{current_ticker}`")
-
-with col_b:
-    override_ticker = st.selectbox(
-        "Optional ticker override",
-        options=tickers,
-        index=tickers.index(current_ticker) if current_ticker in tickers else 0,
-        help="Use the shared selected ticker by default, or override it here if needed."
-    )
-
-use_override = st.checkbox("Use override ticker on this page", value=False)
-
-if use_override:
-    selected_ticker = override_ticker
-else:
-    selected_ticker = current_ticker
-
-if selected_ticker is None:
-    st.warning("No ticker available in the dataset.")
+try:
+    df = load_input_data()
+except Exception as e:
+    st.error("ticker_history_input.csv is missing.")
+    st.exception(e)
     st.stop()
 
-selected_row = get_latest_row_for_ticker(peer_df, selected_ticker)
-selected_year = int(selected_row["year"])
+company_data = df[df["ticker"].astype(str).str.upper() == str(ticker).upper()].copy()
 
-summary_table = build_summary_table(selected_row)
-chart_df = build_chart_df(selected_row)
-takeaways = build_takeaways(selected_row)
+if company_data.empty:
+    st.warning("Ticker not found in dataset.")
+    st.stop()
 
-# SECTION 1: SELECTED TICKER + INTRO
+latest_by_ticker = df.sort_values("year").groupby("ticker", as_index=False).tail(1)
+
+company_latest = latest_by_ticker[latest_by_ticker["ticker"].astype(str).str.upper() == str(ticker).upper()]
+peer_latest = latest_by_ticker[latest_by_ticker["ticker"].astype(str).str.upper() != str(ticker).upper()]
+
+if company_latest.empty:
+    st.warning("No peer comparison data found for this ticker.")
+    st.stop()
+
+company_latest_row = company_latest.iloc[0]
+peer_avg = peer_latest.mean(numeric_only=True)
+
+year_used = int(company_latest_row["year"]) if "year" in company_latest_row.index else None
+
+peer_compare_df = build_peer_comparison_table(company_latest_row, peer_avg)
+
+# SECTION 1
 st.markdown("## 1) Selected Company")
-st.write(
-    f"This page benchmarks **{selected_ticker}** against peer medians using the most recent available observation in the dataset: **{selected_year}**."
-)
-
-# SECTION 2: SUMMARY TABLE
-st.markdown("## 2) Peer Comparison Summary")
-
-display_df = summary_table.copy()
-display_df["Company Value"] = display_df["Company Value"].map(lambda x: format_decimal(x, 3))
-display_df["Peer Median"] = display_df["Peer Median"].map(lambda x: format_decimal(x, 3))
-display_df["Difference"] = summary_table.apply(
-    lambda row: format_difference(row["Company Value"], row["Peer Median"], 3), axis=1
-)
-display_df["Peer Percentile"] = display_df["Peer Percentile"].map(format_percentile)
-
-st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-# SECTION 3: CHARTS
-st.markdown("## 3) Company vs Peer Visuals")
-st.caption("These charts compare the selected company with the peer median across key profitability, balance-sheet, and valuation metrics.")
-
-metric_options = chart_df["Metric"].tolist()
-selected_metrics = st.multiselect(
-    "Choose metrics to visualize",
-    options=metric_options,
-    default=metric_options,
-)
-
-filtered_chart_df = chart_df[chart_df["Metric"].isin(selected_metrics)].copy()
-
-if not filtered_chart_df.empty:
-    company_series = filtered_chart_df.set_index("Metric")["Company"]
-    peer_series = filtered_chart_df.set_index("Metric")["Peer Median"]
-
-    chart_wide = pd.concat(
-        [company_series.rename("Company"), peer_series.rename("Peer Median")],
-        axis=1
+if year_used is not None:
+    st.write(
+        f"This page benchmarks the selected company against peer averages using the **most recent available observation: {year_used}**."
+    )
+else:
+    st.write(
+        "This page benchmarks the selected company against peer averages using the most recent available observation."
     )
 
-    st.bar_chart(chart_wide, use_container_width=True)
-else:
-    st.info("Select at least one metric to display the comparison chart.")
-
-# SECTION 4: KEY TAKEAWAYS
-st.markdown("## 4) Key Takeaways")
-st.info(
-    "These takeaways are generated using simple rules based on how the selected company compares with peer medians and peer percentiles."
+# SECTION 2
+st.markdown("## 2) Peer Comparison Summary")
+st.caption(
+    "The table below compares the selected company’s latest-year values with peer averages. "
+    "The Difference column is color-coded so favorable gaps are easier to spot quickly."
 )
 
-for takeaway in takeaways:
-    st.markdown(f"- {takeaway}")
+st.dataframe(
+    style_peer_table(peer_compare_df),
+    use_container_width=True,
+    hide_index=True,
+)
 
-# OPTIONAL CTA
+# SECTION 3
+st.markdown("## 3) Company vs Peer Visuals")
+st.caption(
+    "Choose which metrics to display below. The grouped bars show the selected company versus the peer average for each metric."
+)
+
+chart_metrics = [
+    "roa",
+    "operating_margin",
+    "revenue_growth",
+    "current_ratio",
+    "debt_to_assets",
+    "price_to_sales",
+    "price_to_book",
+]
+
+default_metrics = [
+    "roa",
+    "operating_margin",
+    "current_ratio",
+    "price_to_sales",
+    "price_to_book",
+]
+
+selected_metrics = st.multiselect(
+    "Choose metrics to visualize",
+    options=chart_metrics,
+    default=default_metrics,
+    format_func=format_metric_label,
+)
+
+chart_long = build_chart_df(company_latest_row, peer_avg, selected_metrics)
+
+if chart_long.empty:
+    st.info("Select at least one metric to display the comparison chart.")
+else:
+    grouped_bar = (
+        alt.Chart(chart_long)
+        .mark_bar(size=26)
+        .encode(
+            x=alt.X("Metric:N", title="Metric"),
+            xOffset=alt.XOffset("Group:N"),
+            y=alt.Y("Value:Q", title="Metric Value"),
+            color=alt.Color(
+                "Group:N",
+                scale=alt.Scale(
+                    domain=["Company", "Peer Average"],
+                    range=["#1f77b4", "#9ecae1"]
+                ),
+                legend=alt.Legend(title="Group")
+            ),
+            tooltip=[
+                alt.Tooltip("Metric:N", title="Metric"),
+                alt.Tooltip("Group:N", title="Group"),
+                alt.Tooltip("Value:Q", title="Value", format=".4f"),
+            ]
+        )
+        .properties(height=430)
+    )
+
+    value_labels = (
+        alt.Chart(chart_long)
+        .mark_text(dy=-8, fontSize=11)
+        .encode(
+            x=alt.X("Metric:N"),
+            xOffset=alt.XOffset("Group:N"),
+            y=alt.Y("Value:Q"),
+            text=alt.Text("Value:Q", format=".2f"),
+            color=alt.value("white")
+        )
+    )
+
+    st.altair_chart(grouped_bar + value_labels, use_container_width=True)
+
+# SECTION 4
+st.markdown("## 4) Key Takeaways")
+st.info(
+    "These takeaways are kept separate from the comparison table so the page can show raw metrics first, then explain what they imply."
+)
+
+takeaways = build_takeaways(company_latest_row, peer_avg)
+
+if takeaways:
+    for takeaway in takeaways:
+        st.write(f"- {takeaway}")
+else:
+    st.write("Not enough peer-comparison signals were available to generate takeaways.")
+
+# SECTION 5
 st.markdown("## 5) Explore More")
 st.markdown(
     """
-- **Valuation:** See the model-based valuation classification for this company.
-- **Risk (CAPM):** Review beta, alpha, and other market-risk metrics.
-- **Methodology:** See how peer benchmarks and model inputs were built.
+- **Valuation Assessment:** Review the model’s latest-year valuation result and historical valuation context.  
+- **Risk Analysis:** Examine beta, alpha, and R-squared for the selected company.  
+- **About:** See the project framing, data sources, and modeling context.  
 """
 )
