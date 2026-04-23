@@ -1,14 +1,22 @@
+# pages/4_Methodology.py
+
 import streamlit as st
 import pandas as pd
 import altair as alt
 from pathlib import Path
 
-st.set_page_config(page_title="About / Methodology", layout="wide")
+st.set_page_config(page_title="Methodology", layout="wide")
 
-st.title("About / Methodology")
-st.caption(
-    "This page explains the project objective, data sources, modeling approach, evaluation results, and workflow behind ValueLens."
-)
+# GLOBAL TICKER STATE
+if "ticker" not in st.session_state:
+    st.session_state["ticker"] = "A"
+
+ticker = st.session_state["ticker"]
+
+# SIDEBAR
+st.sidebar.markdown("---")
+st.sidebar.markdown(f"### Current ticker: `{ticker}`")
+
 
 # FILE HELPERS
 def find_first_file(candidates):
@@ -35,7 +43,6 @@ def load_optional_csv(candidates):
     return pd.read_csv(path), path.name
 
 
-# OPTIONAL FILES
 comparison_df, comparison_file = load_optional_csv([
     "valuation_model_comparison.csv",
     "model_comparison_results.csv",
@@ -170,7 +177,12 @@ def format_num(x, digits=3):
         return "N/A"
 
 
-# TOP SUMMARY
+# PAGE
+st.title("Methodology")
+st.caption(
+    "This page explains the project objective, data sources, modeling approach, evaluation results, and workflow behind ValueLens."
+)
+
 top1, top2, top3, top4 = st.columns(4)
 top1.metric("Final Model", "Logistic Regression")
 top2.metric("Task Type", "3-Class Classification")
@@ -179,7 +191,6 @@ top4.metric("Primary App Goal", "Valuation + Peers + Risk")
 
 st.divider()
 
-# SECTION 1
 st.markdown("## 1) Project Objective")
 st.write(
     "ValueLens is a financial analytics app designed to evaluate healthcare companies from three complementary angles: "
@@ -188,7 +199,6 @@ st.write(
     "**Overvalued**, **Fairly valued**, or **Undervalued** based on financial and valuation features."
 )
 
-# SECTION 2
 st.markdown("## 2) What the Valuation Model Predicts")
 st.markdown(
     """
@@ -201,7 +211,6 @@ st.caption(
     "This is a classification model, not a direct intrinsic-value calculator. It is designed to identify valuation status based on patterns in financial data."
 )
 
-# SECTION 3
 st.markdown("## 3) Data Sources")
 
 d1, d2, d3 = st.columns(3)
@@ -230,7 +239,6 @@ st.caption(
     "The deployed app does not rely on WRDS at runtime. WRDS was used offline to build and train the project artifacts; the app runs from saved CSV/PKL outputs and public/free sources where applicable."
 )
 
-# SECTION 4
 st.markdown("## 4) Feature Groups / Inputs")
 
 f1, f2, f3 = st.columns(3)
@@ -270,7 +278,6 @@ st.caption(
     "These feature groups were designed to capture not only a company’s own financial profile, but also how that profile compares with peers."
 )
 
-# SECTION 5
 st.markdown("## 5) Final Model Choice")
 st.write(
     "The final model used in the app is **Logistic Regression**. "
@@ -278,7 +285,6 @@ st.write(
     "Compared with more complex alternatives, logistic regression made it easier to explain why a company was classified into a given valuation category."
 )
 
-# SECTION 6
 st.markdown("## 6) Model Evaluation")
 
 basic_metrics = compute_basic_metrics(pred_df) if pred_df is not None else None
@@ -306,7 +312,6 @@ if basic_metrics is not None:
         hide_index=True,
     )
 
-# OPTIONAL: CONFUSION MATRIX
 st.markdown("### OPTIONAL: Confusion Matrix")
 cm = make_confusion_matrix(pred_df) if pred_df is not None else None
 
@@ -349,7 +354,6 @@ else:
         "Confusion matrix not shown because `valuation_test_predictions.csv` was not found or did not contain usable actual/predicted label columns."
     )
 
-# SECTION 7
 st.markdown("## 7) Alternative Models Tested")
 
 if comparison_df is not None:
@@ -383,7 +387,6 @@ else:
         "Multiple models were evaluated during development, but the final deployment version emphasizes logistic regression because it provided a good tradeoff between predictive usefulness and interpretability."
     )
 
-# SECTION 8
 st.markdown("## 8) Model Explanation / Coefficient-Based Insight")
 
 if coef_df is not None:
@@ -433,7 +436,6 @@ else:
         "If the coefficient CSV is present in the app folder, this section can visualize class-specific model drivers."
     )
 
-# SECTION 9
 st.markdown("## 9) Workflow Summary")
 
 with st.expander("Show pipeline summary"):
@@ -447,7 +449,6 @@ with st.expander("Show pipeline summary"):
 """
     )
 
-# SECTION 10
 st.markdown("## 10) Limitations")
 
 with st.expander("Show limitations and caveats"):
