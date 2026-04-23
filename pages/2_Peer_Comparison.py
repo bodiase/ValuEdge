@@ -1,3 +1,5 @@
+# pages/2_Peer_Comparison.py
+
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -45,6 +47,10 @@ TICKER_NAME_MAP = {
     "ALGN": "Align Technology, Inc.",
 }
 
+# SIDEBAR
+st.sidebar.markdown("---")
+st.sidebar.markdown(f"### Current ticker: `{ticker}`")
+
 
 # FILE HELPERS
 def find_file(filename):
@@ -88,29 +94,6 @@ def format_metric_label(metric_name):
         "price_to_book": "Price to Book",
     }
     return mapping.get(metric_name, metric_name.replace("_", " ").title())
-
-
-def compare_direction(metric_name, company_value, peer_value):
-    higher_is_better = {
-        "roa": True,
-        "operating_margin": True,
-        "revenue_growth": True,
-        "current_ratio": True,
-        "price_to_sales": False,
-        "price_to_book": False,
-        "debt_to_assets": False,
-    }
-
-    if pd.isna(company_value) or pd.isna(peer_value):
-        return "No comparison available"
-
-    better_when_higher = higher_is_better.get(metric_name, True)
-
-    if company_value > peer_value:
-        return "Better than peers" if better_when_higher else "More expensive / riskier than peers"
-    elif company_value < peer_value:
-        return "Worse than peers" if better_when_higher else "Cheaper / more conservative than peers"
-    return "In line with peers"
 
 
 def style_difference(metric_name, company_value, peer_value):
@@ -231,7 +214,6 @@ def build_takeaways(company_latest, peer_avg):
     pb = company_latest.get("price_to_book", None)
     pb_peer = peer_avg.get("price_to_book", None)
 
-    # Profitability
     if pd.notna(roa) and pd.notna(roa_peer) and pd.notna(margin) and pd.notna(margin_peer):
         if roa > roa_peer and margin > margin_peer:
             takeaways.append(
@@ -249,7 +231,6 @@ def build_takeaways(company_latest, peer_avg):
                 "That suggests the company has some operating strengths, but not a uniformly superior profitability profile."
             )
 
-    # Balance sheet
     if pd.notna(current_ratio) and pd.notna(current_ratio_peer) and pd.notna(debt) and pd.notna(debt_peer):
         if current_ratio > current_ratio_peer and debt < debt_peer:
             takeaways.append(
@@ -267,7 +248,6 @@ def build_takeaways(company_latest, peer_avg):
                 "The company is not clearly more conservative or more aggressive than peers overall."
             )
 
-    # Valuation
     if pd.notna(ps) and pd.notna(ps_peer) and pd.notna(pb) and pd.notna(pb_peer):
         if ps < ps_peer and pb < pb_peer:
             takeaways.append(
@@ -285,7 +265,6 @@ def build_takeaways(company_latest, peer_avg):
                 "The stock does not look uniformly cheap or expensive across the main valuation multiples."
             )
 
-    # Growth
     if pd.notna(growth) and pd.notna(growth_peer):
         if growth > growth_peer:
             takeaways.append(
@@ -336,7 +315,6 @@ year_used = int(company_latest_row["year"]) if "year" in company_latest_row.inde
 
 peer_compare_df = build_peer_comparison_table(company_latest_row, peer_avg)
 
-# SECTION 1
 st.markdown("## 1) Selected Company")
 if year_used is not None:
     st.write(
@@ -347,7 +325,6 @@ else:
         "This page benchmarks the selected company against peer averages using the most recent available observation."
     )
 
-# SECTION 2
 st.markdown("## 2) Peer Comparison Summary")
 st.caption(
     "The table below compares the selected company’s latest-year values with peer averages. "
@@ -360,7 +337,6 @@ st.dataframe(
     hide_index=True,
 )
 
-# SECTION 3
 st.markdown("## 3) Company vs Peer Visuals")
 st.caption(
     "Choose which metrics to display below. The grouped bars show the selected company versus the peer average for each metric."
@@ -434,7 +410,6 @@ else:
 
     st.altair_chart(grouped_bar + value_labels, use_container_width=True)
 
-# SECTION 4
 st.markdown("## 4) Key Takeaways")
 st.info(
     "These takeaways are kept separate from the comparison table so the page can show raw metrics first, then explain what they imply."
@@ -448,12 +423,11 @@ if takeaways:
 else:
     st.write("Not enough peer-comparison signals were available to generate takeaways.")
 
-# SECTION 5
 st.markdown("## 5) Explore More")
 st.markdown(
     """
-- **Valuation Assessment:** Review the model’s latest-year valuation result and historical valuation context.  
-- **Risk Analysis:** Examine beta, alpha, and R-squared for the selected company.  
-- **About:** See the project framing, data sources, and modeling context.  
+- **Valuation Assessment:** Review the model’s latest-year valuation result and historical valuation context  
+- **Risk Analysis:** Examine beta, alpha, and R-squared for the selected company  
+- **Methodology:** See the project framing, data sources, and modeling context  
 """
 )
